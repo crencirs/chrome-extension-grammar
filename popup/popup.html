@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Gemini AI 도우미</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <div class="title-row">
+        <span class="icon">✨</span>
+        <span class="app-title">Gemini AI 번역 & 검토기</span>
+      </div>
+    </header>
+
+    <main class="popup-body">
+      <!-- 상태 카드 -->
+      <div class="info-card">
+        <div class="status-row">
+          <span class="label">API 키 상태</span>
+          <span id="apiKeyBadge" class="badge">확인 중...</span>
+        </div>
+        <div class="status-row">
+          <span class="label">소스 언어 (A)</span>
+          <span id="sourceLangsBadge" class="value-text">-</span>
+        </div>
+        <div class="status-row">
+          <span class="label">결과 언어 (B)</span>
+          <span id="targetLangBadge" class="value-text">-</span>
+        </div>
+        <div class="status-row">
+          <span class="label">AI 모델</span>
+          <span id="modelBadge" class="value-text">-</span>
+        </div>
+      </div>
+
+      <!-- 사용 가이드 -->
+      <div class="guide-box">
+        <div class="guide-title">📌 빠른 사용 팁</div>
+        <ol class="guide-list">
+          <li>웹페이지에서 번역이나 검토를 원하는 문장을 <strong>드래그</strong>합니다.</li>
+          <li>마우스 <strong>우클릭</strong> 후 컨텍스트 메뉴를 선택합니다:
+            <ul>
+              <li><strong>선택한 문장을 번역하기</strong></li>
+              <li><strong>선택한 문장을 검토하기</strong></li>
+            </ul>
+          </li>
+          <li>화면에 나타나는 팝업에서 결과를 확인하고 제안 문장을 복사하세요.</li>
+        </ol>
+      </div>
+
+      <!-- 바로가기 버튼 -->
+      <button id="openOptionsBtn" class="btn btn-primary full-width">
+        ⚙️ 환경설정 (언어 / API 키 변경)
+      </button>
+    </main>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
+
