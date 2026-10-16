@@ -41,7 +41,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!settings.apiKey || settings.apiKey.trim() === '') {
       await sendMessageToTab(tab.id, {
         action: 'SHOW_ERROR',
-        message: 'Gemini API 키가 설정되지 않았습니다. 확장 프로그램 아이콘을 클릭하여 설정(Options)에서 API 키를 입력해 주세요.'
+        message: 'API 키가 설정되지 않았습니다. 확장 프로그램 아이콘을 클릭하여 설정(Options)에서 API 키를 입력해 주세요.'
       });
       return;
     }
@@ -53,16 +53,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         text: selectedText,
         apiKey: settings.apiKey,
         model: settings.model,
-        sourceLangs: settings.sourceLangs,
-        targetLang: settings.targetLang
+        sourceLang: settings.translateSourceLang || 'auto',
+        targetLang: settings.translateTargetLang || 'ko',
+        explanationLang: settings.translateExplanationLang || 'ko'
       });
     } else {
       result = await reviewText({
         text: selectedText,
         apiKey: settings.apiKey,
         model: settings.model,
-        sourceLangs: settings.sourceLangs,
-        targetLang: settings.targetLang
+        sourceLangs: settings.reviewSourceLangs || ['en', 'ko'],
+        targetLang: settings.reviewTargetLang || 'ko'
       });
     }
 
@@ -78,8 +79,24 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     console.error('Service worker execution error:', error);
     await sendMessageToTab(tab.id, {
       action: 'SHOW_ERROR',
-      message: error.message || '처리 중 오류가 발생했습니다.'
+      error: {
+        message: error.message || '처리 중 오류가 발생했습니다.',
+        status: error.status || 0,
+        code: error.code || '',
+        details: error.details || error.message || ''
+      }
     });
+  }
+});
+
+// 확장 프로그램 내부 메시지 핸들러 (환경설정 열기 등)
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'OPEN_OPTIONS') {
+    if (chrome.runtime.openOptionsPage) {
+      chrome.runtime.openOptionsPage();
+    } else {
+      chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') });
+    }
   }
 });
 

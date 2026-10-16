@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini AI 번역 & 검토기 설정</title>
+  <title>AI 번역 & 문장 검토기 설정</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
@@ -11,22 +11,22 @@
       <div class="logo-area">
         <span class="logo-icon">✨</span>
         <div>
-          <h1>Gemini AI 번역 & 문장 검토기</h1>
+          <h1>AI 번역 & 문장 검토기</h1>
           <p class="subtitle">확장 프로그램 환경설정</p>
         </div>
       </div>
     </header>
 
     <main class="content">
-      <!-- 1. API 키 설정 -->
+      <!-- 1. API 키 및 모델 설정 -->
       <section class="card">
-        <h2>1. Google Gemini API 설정</h2>
+        <h2>1. AI API 및 모델 설정</h2>
         <p class="description">
-          구글 AI Studio에서 무료로 발급받은 Gemini API 키를 입력해 주세요. 
+          AI 서비스(Google AI Studio 등)에서 발급받은 API 키를 입력해 주세요. 
           <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">API 키 발급받기 &rarr;</a>
         </p>
         <div class="form-group">
-          <label for="apiKey">Gemini API Key</label>
+          <label for="apiKey">API Key</label>
           <div class="input-with-button">
             <input type="password" id="apiKey" placeholder="AIzaSy..." autocomplete="off">
             <button type="button" id="toggleApiKeyBtn" class="btn btn-outline" title="키 표시/숨김">표시</button>
@@ -36,42 +36,83 @@
         </div>
 
         <div class="form-group">
-          <label for="modelSelect">사용할 Gemini 모델</label>
+          <label for="modelSelect">사용할 AI 모델</label>
           <select id="modelSelect">
             <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (추천 / 기본)</option>
             <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+            <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it</option>
+            <option value="gemma-4-31b-it">gemma-4-31b-it</option>
             <option value="custom">직접 입력 (Custom)...</option>
           </select>
           <input type="text" id="customModelInput" placeholder="모델명 직접 입력 (예: gemini-3.5-flash-lite)" style="display: none; margin-top: 6px;">
         </div>
       </section>
 
-      <!-- 2. 언어 설정 -->
+      <!-- 2. 번역 기능 언어 설정 -->
       <section class="card">
-        <h2>2. 언어 설정</h2>
+        <h2>2. 번역 기능 언어 설정</h2>
+        <p class="description">'선택한 문장을 번역하기' 실행 시 적용할 출발 언어(A), 도착 언어(B), 그리고 참고 노트를 출력할 설명 언어(C)를 설정합니다.</p>
+        
+        <div class="two-column-grid">
+          <div class="form-group">
+            <label for="translateSourceSelect" class="group-title">
+              출발 언어 A
+              <span class="help-badge">원문</span>
+            </label>
+            <select id="translateSourceSelect">
+              <!-- JavaScript로 동적 렌더링 (자동 감지 + 지원 언어) -->
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="translateTargetSelect" class="group-title">
+              도착 언어 B
+              <span class="help-badge">번역 결과</span>
+            </label>
+            <select id="translateTargetSelect">
+              <!-- JavaScript로 동적 렌더링 -->
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 14px;">
+          <label for="translateExplanationSelect" class="group-title">
+            설명 언어 C (참고 노트 및 라벨)
+            <span class="help-badge">참고 노트 / 어휘 팁 언어</span>
+          </label>
+          <p class="description" style="margin-bottom: 8px;">번역문의 뉘앙스, 주요 어휘 팁 및 추천 대안 문장의 스타일 라벨을 표시할 언어입니다.</p>
+          <select id="translateExplanationSelect">
+            <!-- JavaScript로 동적 렌더링 -->
+          </select>
+        </div>
+      </section>
+
+      <!-- 3. 검토 기능 언어 설정 -->
+      <section class="card">
+        <h2>3. 검토 기능 언어 설정</h2>
+        <p class="description">'선택한 문장을 검토하기' 실행 시 적용할 검토 대상 언어 후보(A)와 설명 출력 언어(B)를 설정합니다.</p>
         
         <div class="form-group">
           <label class="group-title">
-            소스 언어 후보 A (최대 2개 선택)
+            검토 대상 언어 후보 A (최대 2개 선택)
             <span class="help-badge">AI가 둘 중 어떤 언어인지 자동 판단</span>
           </label>
-          <p class="description">드래그한 문장이 어떤 언어인지 판별할 후보 언어를 최대 2개까지 선택하세요.</p>
-          <div id="sourceLangList" class="checkbox-grid">
+          <p class="description">드래그한 문장이 어떤 언어로 쓰였는지 식별할 후보 언어를 최대 2개까지 선택하세요.</p>
+          <div id="reviewSourceLangList" class="checkbox-grid">
             <!-- JavaScript로 동적 렌더링 -->
           </div>
-          <span id="sourceLangWarning" class="warning-hint"></span>
+          <span id="reviewSourceLangWarning" class="warning-hint"></span>
         </div>
 
         <hr class="divider">
 
         <div class="form-group">
-          <label for="targetLangSelect" class="group-title">
-            결과 언어 B (1개 선택)
-            <span class="help-badge">번역 및 설명 출력 언어</span>
+          <label for="reviewTargetSelect" class="group-title">
+            설명 및 피드백 출력 언어 B (1개 선택)
+            <span class="help-badge">유추된 의도 / 문법 분석 / 피드백 언어</span>
           </label>
-          <p class="description">최종 번역 결과 및 검토 조언을 전달받을 언어를 선택하세요.</p>
-          <select id="targetLangSelect">
+          <p class="description">유추된 의도, 문법 오류 분석 및 종합 조언을 전달받을 언어를 선택하세요.</p>
+          <select id="reviewTargetSelect">
             <!-- JavaScript로 동적 렌더링 -->
           </select>
         </div>

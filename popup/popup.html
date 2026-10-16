@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Gemini AI 도우미</title>
+  <title>AI 번역 & 문장 검토기</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -10,7 +10,7 @@
     <header class="popup-header">
       <div class="title-row">
         <span class="icon">✨</span>
-        <span class="app-title">Gemini AI 번역 & 검토기</span>
+        <span class="app-title">AI 번역 & 문장 검토기</span>
       </div>
     </header>
 
@@ -22,16 +22,20 @@
           <span id="apiKeyBadge" class="badge">확인 중...</span>
         </div>
         <div class="status-row">
-          <span class="label">소스 언어 (A)</span>
-          <span id="sourceLangsBadge" class="value-text">-</span>
-        </div>
-        <div class="status-row">
-          <span class="label">결과 언어 (B)</span>
-          <span id="targetLangBadge" class="value-text">-</span>
-        </div>
-        <div class="status-row">
           <span class="label">AI 모델</span>
           <span id="modelBadge" class="value-text">-</span>
+        </div>
+        <div class="status-row">
+          <span class="label">번역 언어</span>
+          <span id="translateLangBadge" class="value-text">-</span>
+        </div>
+        <div class="status-row">
+          <span class="label">검토 대상 후보</span>
+          <span id="reviewSourceBadge" class="value-text">-</span>
+        </div>
+        <div class="status-row">
+          <span class="label">검토 설명 언어</span>
+          <span id="reviewTargetBadge" class="value-text">-</span>
         </div>
       </div>
 

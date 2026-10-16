@@ -139,6 +139,18 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
+.two-column-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 600px) {
+  .two-column-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .checkbox-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

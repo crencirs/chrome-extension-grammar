@@ -1,5 +1,11 @@
 // options/options.js
-import { SUPPORTED_LANGUAGES, DEFAULT_SETTINGS, getSettings, saveSettings } from '../utils/storage.js';
+import { 
+  SUPPORTED_LANGUAGES, 
+  TRANSLATE_SOURCE_LANGUAGES, 
+  DEFAULT_SETTINGS, 
+  getSettings, 
+  saveSettings 
+} from '../utils/storage.js';
 import { callGemini } from '../utils/gemini.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -9,9 +15,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   const apiKeyStatus = document.getElementById('apiKeyStatus');
   const modelSelect = document.getElementById('modelSelect');
   const customModelInput = document.getElementById('customModelInput');
-  const sourceLangList = document.getElementById('sourceLangList');
-  const sourceLangWarning = document.getElementById('sourceLangWarning');
-  const targetLangSelect = document.getElementById('targetLangSelect');
+
+  // 번역 설정 요소
+  const translateSourceSelect = document.getElementById('translateSourceSelect');
+  const translateTargetSelect = document.getElementById('translateTargetSelect');
+  const translateExplanationSelect = document.getElementById('translateExplanationSelect');
+
+  // 검토 설정 요소
+  const reviewSourceLangList = document.getElementById('reviewSourceLangList');
+  const reviewSourceLangWarning = document.getElementById('reviewSourceLangWarning');
+  const reviewTargetSelect = document.getElementById('reviewTargetSelect');
+
+  // 저장 요소
   const saveBtn = document.getElementById('saveBtn');
   const saveStatus = document.getElementById('saveStatus');
 
@@ -48,20 +63,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     return modelSelect.value;
   }
 
-  // 2. 타겟 언어 셀렉트 박스 렌더링
-  targetLangSelect.innerHTML = SUPPORTED_LANGUAGES.map(lang => `
-    <option value="${lang.code}" ${lang.code === settings.targetLang ? 'selected' : ''}>
+  // 2. 번역 기능 드롭다운 렌더링
+  const currentTranslateSource = settings.translateSourceLang || DEFAULT_SETTINGS.translateSourceLang;
+  translateSourceSelect.innerHTML = TRANSLATE_SOURCE_LANGUAGES.map(lang => `
+    <option value="${lang.code}" ${lang.code === currentTranslateSource ? 'selected' : ''}>
       ${lang.name}
     </option>
   `).join('');
 
-  // 3. 소스 언어 체크박스 렌더링 및 상태 관리
-  let currentSourceLangs = Array.isArray(settings.sourceLangs) && settings.sourceLangs.length > 0
-    ? [...settings.sourceLangs]
-    : [...DEFAULT_SETTINGS.sourceLangs];
+  const currentTranslateTarget = settings.translateTargetLang || DEFAULT_SETTINGS.translateTargetLang;
+  translateTargetSelect.innerHTML = SUPPORTED_LANGUAGES.map(lang => `
+    <option value="${lang.code}" ${lang.code === currentTranslateTarget ? 'selected' : ''}>
+      ${lang.name}
+    </option>
+  `).join('');
+
+  const currentTranslateExplanation = settings.translateExplanationLang || DEFAULT_SETTINGS.translateExplanationLang;
+  translateExplanationSelect.innerHTML = SUPPORTED_LANGUAGES.map(lang => `
+    <option value="${lang.code}" ${lang.code === currentTranslateExplanation ? 'selected' : ''}>
+      ${lang.name}
+    </option>
+  `).join('');
+
+  // 3. 검토 기능 설명 출력 언어 드롭다운 렌더링
+  const currentReviewTarget = settings.reviewTargetLang || DEFAULT_SETTINGS.reviewTargetLang;
+  reviewTargetSelect.innerHTML = SUPPORTED_LANGUAGES.map(lang => `
+    <option value="${lang.code}" ${lang.code === currentReviewTarget ? 'selected' : ''}>
+      ${lang.name}
+    </option>
+  `).join('');
+
+  // 4. 검토 기능 후보 언어 체크박스 렌더링 및 상태 관리
+  let currentReviewSourceLangs = Array.isArray(settings.reviewSourceLangs) && settings.reviewSourceLangs.length > 0
+    ? [...settings.reviewSourceLangs]
+    : [...DEFAULT_SETTINGS.reviewSourceLangs];
 
   // DOM 1회 생성
-  sourceLangList.innerHTML = SUPPORTED_LANGUAGES.map(lang => `
+  reviewSourceLangList.innerHTML = SUPPORTED_LANGUAGES.map(lang => `
     <label class="checkbox-label" data-code="${lang.code}">
       <input type="checkbox" value="${lang.code}">
       <span>${lang.name}</span>
@@ -70,11 +108,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // UI 상태 동기화 함수
   function updateCheckboxUI() {
-    const isMax = currentSourceLangs.length >= 2;
-    sourceLangList.querySelectorAll('.checkbox-label').forEach(label => {
+    const isMax = currentReviewSourceLangs.length >= 2;
+    reviewSourceLangList.querySelectorAll('.checkbox-label').forEach(label => {
       const code = label.getAttribute('data-code');
       const input = label.querySelector('input[type="checkbox"]');
-      const isChecked = currentSourceLangs.includes(code);
+      const isChecked = currentReviewSourceLangs.includes(code);
 
       input.checked = isChecked;
       label.classList.toggle('checked', isChecked);
@@ -87,22 +125,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 체크박스 클릭 이벤트 리스너 등록
-  sourceLangList.querySelectorAll('input[type="checkbox"]').forEach(input => {
-    input.addEventListener('change', (e) => {
+  reviewSourceLangList.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    input.addEventListener('change', () => {
       const code = input.value;
       if (input.checked) {
-        if (currentSourceLangs.length >= 2) {
+        if (currentReviewSourceLangs.length >= 2) {
           input.checked = false;
-          sourceLangWarning.textContent = '소스 언어는 최대 2개까지만 선택할 수 있습니다.';
+          reviewSourceLangWarning.textContent = '검토 대상 언어는 최대 2개까지만 선택할 수 있습니다.';
           return;
         }
-        if (!currentSourceLangs.includes(code)) {
-          currentSourceLangs.push(code);
+        if (!currentReviewSourceLangs.includes(code)) {
+          currentReviewSourceLangs.push(code);
         }
-        sourceLangWarning.textContent = '';
+        reviewSourceLangWarning.textContent = '';
       } else {
-        currentSourceLangs = currentSourceLangs.filter(c => c !== code);
-        sourceLangWarning.textContent = '';
+        currentReviewSourceLangs = currentReviewSourceLangs.filter(c => c !== code);
+        reviewSourceLangWarning.textContent = '';
       }
       updateCheckboxUI();
     });
@@ -133,7 +171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     testApiKeyBtn.disabled = true;
     testApiKeyBtn.textContent = '검증 중...';
-    apiKeyStatus.textContent = '구글 서버와 연결 중입니다...';
+    apiKeyStatus.textContent = 'AI 서버와 연결 중입니다...';
     apiKeyStatus.className = 'status-hint';
 
     try {
@@ -142,7 +180,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         model: getSelectedModel(),
         contents: [{ parts: [{ text: 'Respond with OK' }] }]
       });
-      apiKeyStatus.textContent = '✓ 유효한 Gemini API 키입니다. 정상 연결되었습니다!';
+      apiKeyStatus.textContent = '✓ 유효한 API 키입니다. 정상 연결되었습니다!';
       apiKeyStatus.className = 'status-hint success';
     } catch (err) {
       apiKeyStatus.textContent = `✗ 검증 실패: ${err.message}`;
@@ -155,16 +193,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 설정 저장
   saveBtn.addEventListener('click', async () => {
-    if (currentSourceLangs.length === 0) {
-      alert('소스 언어 후보를 최소 1개 이상 선택해 주세요.');
+    if (currentReviewSourceLangs.length === 0) {
+      alert('검토 대상 언어 후보를 최소 1개 이상 선택해 주세요.');
       return;
     }
 
     const newSettings = {
       apiKey: apiKeyInput.value.trim(),
       model: getSelectedModel(),
-      sourceLangs: [...currentSourceLangs],
-      targetLang: targetLangSelect.value
+      // 번역 설정
+      translateSourceLang: translateSourceSelect.value,
+      translateTargetLang: translateTargetSelect.value,
+      translateExplanationLang: translateExplanationSelect.value,
+      // 검토 설정
+      reviewSourceLangs: [...currentReviewSourceLangs],
+      reviewTargetLang: reviewTargetSelect.value
     };
 
     try {
@@ -179,4 +222,3 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 });
-
