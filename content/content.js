@@ -11,6 +11,14 @@
   let hasUserDragged = false;
   let dragOffset = { x: 0, y: 0 };
   let lastSelectionRect = null;
+  let safetyTimeoutId = null;
+
+  function clearSafetyTimeout() {
+    if (safetyTimeoutId) {
+      clearTimeout(safetyTimeoutId);
+      safetyTimeoutId = null;
+    }
+  }
 
   // 컨테이너 초기화 (Shadow DOM)
   function initContainer() {
@@ -41,6 +49,7 @@
 
   // 팝업 닫기
   function closePopup() {
+    clearSafetyTimeout();
     if (!shadowRoot) return;
     const card = shadowRoot.querySelector('.gemini-card');
     if (card) card.remove();
@@ -215,6 +224,16 @@
 
   // 1. 로딩 화면
   function renderLoading(mode, selectedText) {
+    clearSafetyTimeout();
+    // 50초 동안 아무런 응답이 오지 않을 경우 프론트엔드 안전 타임아웃 발동
+    safetyTimeoutId = setTimeout(() => {
+      renderError({
+        status: 504,
+        code: 'DEADLINE_EXCEEDED',
+        message: '응답 시간 초과 (50초 Safety Timeout): AI 서버의 연산이 지연되었거나 응답이 중단되었습니다. 더 빠른 모델로 변경해 보세요.'
+      });
+    }, 50000);
+
     const card = getOrCreateCard();
     const modeTitle = mode === 'translate' ? 'AI 문장 번역 중...' : 'AI 문장 검토 중...';
     const previewText = selectedText.length > 100 ? selectedText.slice(0, 100) + '...' : selectedText;
@@ -242,6 +261,7 @@
 
   // 2. 결과 화면
   function renderResult(mode, data, originalText) {
+    clearSafetyTimeout();
     const card = getOrCreateCard();
     const isTranslate = mode === 'translate';
     const modeTitle = isTranslate ? 'AI 번역 결과' : 'AI 문장 검토 & 제안';
@@ -387,6 +407,18 @@
 
     const lower = (msg + ' ' + code + ' ' + details).toLowerCase();
 
+    // 0. 타임아웃 / 응답 시간 초과 (HTTP 504 / DEADLINE_EXCEEDED / timeout)
+    if (status === 504 || code === 'DEADLINE_EXCEEDED' || lower.includes('deadline_exceeded') || lower.includes('timeout') || lower.includes('시간 초과') || lower.includes('aborterror')) {
+      return {
+        badge: 'HTTP 504 · 응답 시간 초과',
+        badgeClass: 'badge-warning',
+        title: 'AI 응답 생성 시간이 초과되었습니다',
+        desc: '선택하신 AI 모델(예: Gemma 대형 모델 등)의 크기가 커서 연산 시간이 지연되었거나 서버 응답이 없습니다.',
+        solution: '환경설정에서 더 빠른 경량 모델(예: gemini-3.5-flash-lite 등)로 변경하시거나 잠시 후 다시 시도해 주세요.',
+        details
+      };
+    }
+
     // 1. 무료 할당량 초과 (HTTP 429 / RESOURCE_EXHAUSTED / insufficient_quota / rate_limit)
     if (status === 429 || code === 'RESOURCE_EXHAUSTED' || lower.includes('quota') || lower.includes('resource_exhausted') || lower.includes('rate_limit') || lower.includes('rate limit') || lower.includes('insufficient_quota')) {
       return {
@@ -460,6 +492,7 @@
 
   // 3. 에러 화면
   function renderError(errorData) {
+    clearSafetyTimeout();
     const card = getOrCreateCard();
     const info = analyzeError(errorData);
 

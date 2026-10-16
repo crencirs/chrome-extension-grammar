@@ -8,7 +8,42 @@ function getLanguageName(code) {
 }
 
 /**
- * Gemini API를 호출하여 콘텐츠를 생성합니다.
+ * 텍스트에서 안전하게 JSON을 추출하여 파싱합니다.
+ * 마크다운 코드블록(```json ... ```)이나 불필요한 줄글이 섞여 있어도 파싱을 성공시킵니다.
+ */
+function parseJsonSafely(text) {
+  if (!text || typeof text !== 'string') return null;
+
+  // 1. 순수 JSON 파싱 시도
+  try {
+    return JSON.parse(text);
+  } catch (_) {}
+
+  // 2. ```json ... ``` 또는 ``` ... ``` 마크다운 블록 추출
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch (_) {}
+  }
+
+  // 3. 문자열 내부에서 가장 바깥쪽의 { ... } 블록 추출
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      const jsonCandidate = text.slice(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonCandidate);
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+/**
+ * Gemini / Gemma API를 호출하여 콘텐츠를 생성합니다.
+ * - Gemma 모델은 systemInstruction과 responseSchema를 지원하지 않으므로 자동으로 프롬프트 결합 방식으로 폴백합니다.
+ * - 45초 타임아웃을 적용하여 무한 대기를 방지합니다.
  */
 export async function callGemini({ apiKey, model = 'gemini-3.5-flash-lite', contents, systemInstruction = '', responseSchema = null }) {
   if (!apiKey || apiKey.trim() === '') {
@@ -16,32 +51,73 @@ export async function callGemini({ apiKey, model = 'gemini-3.5-flash-lite', cont
   }
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+  const isGemma = (model || '').toLowerCase().includes('gemma');
 
+  let finalContents = contents;
   const body = {
-    contents: contents,
     generationConfig: {
       temperature: 0.3
     }
   };
 
-  if (systemInstruction) {
-    body.systemInstruction = {
-      parts: [{ text: systemInstruction }]
-    };
+  // Gemma 모델인 경우: systemInstruction과 responseSchema 미지원 -> 프롬프트로 병합
+  if (isGemma) {
+    let combinedPrompt = '';
+    if (systemInstruction) {
+      combinedPrompt += `[SYSTEM INSTRUCTION]\n${systemInstruction}\n\n`;
+    }
+    const userPrompt = contents?.[0]?.parts?.[0]?.text || '';
+    combinedPrompt += `[USER REQUEST]\n${userPrompt}\n\n`;
+    if (responseSchema) {
+      combinedPrompt += `[IMPORTANT OUTPUT FORMAT]\nDo NOT wrap with markdown, explanation, or chat text. Output MUST be ONLY a single valid raw JSON object matching this schema:\n${JSON.stringify(responseSchema, null, 2)}`;
+    }
+
+    finalContents = [{ parts: [{ text: combinedPrompt }] }];
+  } else {
+    // 일반 Gemini 모델인 경우: 표준 Structured Outputs 및 systemInstruction 사용
+    if (systemInstruction) {
+      body.systemInstruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    if (responseSchema) {
+      body.generationConfig.responseMimeType = 'application/json';
+      body.generationConfig.responseSchema = responseSchema;
+    }
   }
 
-  if (responseSchema) {
-    body.generationConfig.responseMimeType = 'application/json';
-    body.generationConfig.responseSchema = responseSchema;
-  }
+  body.contents = finalContents;
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
+  // 45초 타임아웃 제어 (Gemma 대형 모델 등 무한 대기 방지)
+  const controller = new AbortController();
+  const timeoutMs = 45000;
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (fetchErr) {
+    clearTimeout(timeoutId);
+    if (fetchErr.name === 'AbortError') {
+      const timeoutErr = new Error(`AI 서버 응답 시간 초과 (${timeoutMs / 1000}초 Timeout): ${model} 모델의 크기가 커서 응답 생성이 지연되었거나 서버가 응답하지 않습니다. 다른 경량 모델(예: gemini-3.5-flash-lite)로 변경해 보세요.`);
+      timeoutErr.status = 504;
+      timeoutErr.code = 'DEADLINE_EXCEEDED';
+      throw timeoutErr;
+    }
+    throw fetchErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     let errorMsg = `API 요청 실패 (HTTP ${response.status})`;
@@ -75,13 +151,6 @@ export async function callGemini({ apiKey, model = 'gemini-3.5-flash-lite', cont
 
 /**
  * 번역 수행 함수
- * @param {Object} params
- * @param {string} params.text 원문 텍스트
- * @param {string} params.apiKey Gemini API 키
- * @param {string} params.model 사용할 모델
- * @param {string} [params.sourceLang='auto'] 출발 언어 코드 ('auto'인 경우 자동 감지)
- * @param {string} [params.targetLang='ko'] 도착 언어 코드
- * @param {string} [params.explanationLang='ko'] 참고 노트 및 설명 출력 언어 코드
  */
 export async function translateText({ text, apiKey, model, sourceLang = 'auto', targetLang = 'ko', explanationLang = 'ko' }) {
   const targetLangName = getLanguageName(targetLang);
@@ -150,26 +219,21 @@ ${text}
     responseSchema: schema
   });
 
-  try {
-    return JSON.parse(responseText);
-  } catch (err) {
-    return {
-      detectedLanguage: "자동 감지",
-      translatedText: responseText,
-      alternatives: [],
-      notes: ""
-    };
+  const parsed = parseJsonSafely(responseText);
+  if (parsed && parsed.translatedText) {
+    return parsed;
   }
+
+  return {
+    detectedLanguage: "자동 감지",
+    translatedText: responseText,
+    alternatives: [],
+    notes: ""
+  };
 }
 
 /**
  * 문장 검토 및 제안 수행 함수
- * @param {Object} params
- * @param {string} params.text 검토할 원문
- * @param {string} params.apiKey Gemini API 키
- * @param {string} params.model 모델명
- * @param {string[]} params.sourceLangs 검토 대상 후보 언어 목록 (최대 2개)
- * @param {string} params.targetLang 피드백 및 설명 출력 언어
  */
 export async function reviewText({ text, apiKey, model, sourceLangs, targetLang }) {
   const sourceLangNames = (sourceLangs || []).map(getLanguageName).join(', ');
@@ -243,15 +307,16 @@ ${text}
     responseSchema: schema
   });
 
-  try {
-    return JSON.parse(responseText);
-  } catch (err) {
-    return {
-      detectedLanguage: "자동 감지",
-      inferredIntent: "의도 유추 불가",
-      suggestions: [{ text: responseText, label: "기본 결과" }],
-      grammarIssues: [],
-      overallFeedback: ""
-    };
+  const parsed = parseJsonSafely(responseText);
+  if (parsed && parsed.suggestions) {
+    return parsed;
   }
+
+  return {
+    detectedLanguage: "자동 감지",
+    inferredIntent: "의도 유추 불가",
+    suggestions: [{ text: responseText, label: "기본 결과" }],
+    grammarIssues: [],
+    overallFeedback: ""
+  };
 }
