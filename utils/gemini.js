@@ -383,7 +383,7 @@ ${text}
 /**
  * 문장 검토 및 제안 수행 함수
  */
-export async function reviewText({ text, provider = 'gemini', apiKey, model, sourceLangs, targetLang }) {
+export async function reviewText({ text, provider = 'gemini', apiKey, model, sourceLangs, targetLang, refinementContext = null }) {
   const sourceLangNames = (sourceLangs || []).map(getLanguageName).join(', ');
   const targetLangName = getLanguageName(targetLang);
 
@@ -404,10 +404,34 @@ export async function reviewText({ text, provider = 'gemini', apiKey, model, sou
 
 반드시 지정된 JSON 스키마 형식으로만 응답해야 합니다.`;
 
+  let refinementPromptBlock = '';
+  if (refinementContext && refinementContext.latestFeedback) {
+    const prevSugs = Array.isArray(refinementContext.previousSuggestions)
+      ? refinementContext.previousSuggestions.map((s, i) => `  ${i + 1}. [${s.label || '제안'}] ${s.text}`).join('\n')
+      : '';
+    const historyList = Array.isArray(refinementContext.feedbackHistory) && refinementContext.feedbackHistory.length > 0
+      ? refinementContext.feedbackHistory.map((fb, i) => `  ${i + 1}차 요청: "${fb}"`).join('\n')
+      : `  1차 요청: "${refinementContext.latestFeedback}"`;
+
+    refinementPromptBlock = `
+
+[이전 AI 검토 내역 및 사용자 의도 정정/추가 요청]:
+- 이전 AI가 유추했던 의도: "${refinementContext.previousIntent || ''}"
+${prevSugs ? `- 이전 AI 추천 문장:\n${prevSugs}\n` : ''}- 사용자의 누적 의도 설명 및 추가 요청 내역:
+${historyList}
+- 이번 최신 핵심 반영 요청: "${refinementContext.latestFeedback}"
+
+[재검토 필수 지침]:
+1. 사용자가 직접 설명한 실제 의도와 추가 요청("${refinementContext.latestFeedback}")을 최우선으로 반영하십시오.
+2. "inferredIntent"에는 사용자의 추가 설명을 반영하여 새롭게 정리된 의도를 [${targetLangName}]로 작성하십시오.
+3. "suggestions"에는 사용자의 실제 의도와 요청 방향에 부합하도록 수정/개선된 완성 문장 2~3개를 제안하십시오.
+4. 만약 사용자가 원문의 특정 표현 의도를 설명한 것이라면, 그 의도에 비추어 원문의 어색한 점이나 문법/표현 분석("grammarIssues") 및 종합 피드백("overallFeedback")도 함께 업데이트하여 [${targetLangName}]로 작성하십시오.`;
+  }
+
   const prompt = `검토할 원문:
 """
 ${text}
-"""
+"""${refinementPromptBlock}
 
 [주의]: inferredIntent, grammarIssues, overallFeedback, suggestion label의 모든 설명 텍스트는 반드시 [${targetLangName}]로 작성해야 합니다.`;
 

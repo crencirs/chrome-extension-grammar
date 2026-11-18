@@ -12,6 +12,11 @@
   let dragOffset = { x: 0, y: 0 };
   let lastSelectionRect = null;
   let safetyTimeoutId = null;
+  let reviewHistory = [];       // [{ data, originalText, userFeedback }]
+  let currentHistoryIndex = 0;  // 현재 표시 중인 검토 답변 인덱스
+  let isRefining = false;       // 재검토 요청 진행 중 여부
+  let pendingRefineText = '';   // 재검토 진행 중 표시할 입력 텍스트
+  let activeRefineRequestId = 0;
 
   function clearSafetyTimeout() {
     if (safetyTimeoutId) {
@@ -50,6 +55,11 @@
   // 팝업 닫기
   function closePopup() {
     clearSafetyTimeout();
+    activeRefineRequestId += 1;
+    reviewHistory = [];
+    currentHistoryIndex = 0;
+    isRefining = false;
+    pendingRefineText = '';
     if (!shadowRoot) return;
     const card = shadowRoot.querySelector('.gemini-card');
     if (card) card.remove();
@@ -185,7 +195,7 @@
     if (!header) return;
 
     header.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.close-btn')) return;
+      if (e.target.closest('.close-btn, .history-nav')) return;
       isDragging = true;
       hasUserDragged = true; // 사용자가 수동 드래그했음을 표시
       const rect = card.getBoundingClientRect();
@@ -214,10 +224,30 @@
   // 메시지 수신 핸들러
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'SHOW_LOADING') {
+      activeRefineRequestId += 1;
+      reviewHistory = [];
+      currentHistoryIndex = 0;
+      isRefining = false;
+      pendingRefineText = '';
       renderLoading(message.mode, message.selectedText);
     } else if (message.action === 'SHOW_RESULT') {
+      isRefining = false;
+      pendingRefineText = '';
+      if (message.mode === 'review') {
+        reviewHistory = [{
+          data: message.data,
+          originalText: message.originalText,
+          userFeedback: ''
+        }];
+        currentHistoryIndex = 0;
+      } else {
+        reviewHistory = [];
+        currentHistoryIndex = 0;
+      }
       renderResult(message.mode, message.data, message.originalText);
     } else if (message.action === 'SHOW_ERROR') {
+      isRefining = false;
+      pendingRefineText = '';
       renderError(message.error || message.message);
     }
   });
@@ -349,6 +379,10 @@
         ? `<ul class="issue-list">${issues.map(iss => `<li>${escapeHtml(iss)}</li>`).join('')}</ul>`
         : '<p class="no-issues">발견된 중대한 문법 오류가 없습니다. 문장이 매우 훌륭합니다!</p>';
 
+      const currentEntry = reviewHistory[currentHistoryIndex] || null;
+      const appliedFeedback = currentEntry?.userFeedback || '';
+      const intentText = data.inferredIntent || '유추된 의도 정보가 없습니다. 아래에 원하시는 의도나 방향을 입력해 보세요.';
+
       contentHtml = `
         <div class="meta-row">
           <span class="badge lang-badge">감지된 언어: ${escapeHtml(data.detectedLanguage || '자동')}</span>
@@ -359,12 +393,36 @@
           <div class="section-label">원문</div>
           <div class="text-box original-box">${escapeHtml(originalText)}</div>
         </div>
-        ${data.inferredIntent ? `
-          <div class="section intent-section">
-            <div class="section-label">💡 유추된 의도</div>
-            <p class="intent-text">${escapeHtml(data.inferredIntent)}</p>
+        <div class="section intent-section">
+          <div class="section-label">💡 유추된 의도</div>
+          <p class="intent-text">${escapeHtml(intentText)}</p>
+          ${appliedFeedback ? `
+            <div class="applied-feedback-box">
+              <span class="applied-feedback-label">💬 반영된 내 의도/요청:</span>
+              <span class="applied-feedback-text">"${escapeHtml(appliedFeedback)}"</span>
+            </div>
+          ` : ''}
+          <div class="intent-refine-box">
+            <div class="refine-input-row">
+              <input
+                type="text"
+                class="refine-input"
+                value="${escapeHtml(isRefining ? pendingRefineText : appliedFeedback)}"
+                placeholder="실제 의도나 원하는 수정 방향을 입력하세요"
+                ${isRefining ? 'disabled' : ''}
+              />
+              <button class="refine-submit-btn" ${isRefining ? 'disabled' : ''}>
+                ${isRefining ? '생성 중...' : '재검토'}
+              </button>
+            </div>
+            ${isRefining ? `
+              <div class="refine-loading-row">
+                <div class="mini-spinner"></div>
+                <span>입력하신 의도를 반영하여 새로운 답변을 생성하고 있습니다...</span>
+              </div>
+            ` : ''}
           </div>
-        ` : ''}
+        </div>
         <div class="section">
           <div class="section-label highlight">추천 대안 문장</div>
           <div class="suggestions-list">${suggestionsHtml}</div>
@@ -382,13 +440,26 @@
       `;
     }
 
+    const totalHistory = reviewHistory.length;
+    const currentNum = currentHistoryIndex + 1;
+    const paginationHtml = (!isTranslate && totalHistory > 1) ? `
+      <div class="history-nav" title="이전/다음 검토 답변 보기">
+        <button class="history-btn prev-history-btn" ${currentHistoryIndex <= 0 || isRefining ? 'disabled' : ''} title="이전 답변">&lsaquo;</button>
+        <span class="history-indicator">${currentNum} / ${totalHistory}</span>
+        <button class="history-btn next-history-btn" ${currentHistoryIndex >= totalHistory - 1 || isRefining ? 'disabled' : ''} title="다음 답변">&rsaquo;</button>
+      </div>
+    ` : '';
+
     card.innerHTML = `
       <div class="gemini-header">
         <div class="title-wrap">
           <span class="icon">✨</span>
           <span class="title">${modeTitle}</span>
         </div>
-        <button class="close-btn" title="닫기 (Esc)">&times;</button>
+        <div class="header-right">
+          ${paginationHtml}
+          <button class="close-btn" title="닫기 (Esc)">&times;</button>
+        </div>
       </div>
       <div class="gemini-body result-view">
         ${contentHtml}
@@ -396,6 +467,75 @@
     `;
 
     setupCardEvents(card);
+  }
+
+  // 의도 보정 / 추가 질문 재검토 요청
+  function handleRefineSubmit(feedbackText) {
+    const trimmed = (feedbackText || '').trim();
+    if (!trimmed || isRefining || reviewHistory.length === 0) return;
+
+    const currentEntry = reviewHistory[currentHistoryIndex] || reviewHistory[reviewHistory.length - 1];
+    if (!currentEntry) return;
+
+    const requestId = ++activeRefineRequestId;
+    isRefining = true;
+    pendingRefineText = trimmed;
+    renderResult('review', currentEntry.data, currentEntry.originalText);
+
+    clearSafetyTimeout();
+    safetyTimeoutId = setTimeout(() => {
+      if (requestId !== activeRefineRequestId) return;
+      isRefining = false;
+      pendingRefineText = '';
+      renderError({
+        status: 504,
+        code: 'DEADLINE_EXCEEDED',
+        message: '응답 시간 초과 (50초 Safety Timeout): AI 서버의 연산이 지연되었거나 응답이 중단되었습니다. 더 빠른 모델로 변경해 보세요.'
+      });
+    }, 50000);
+
+    const priorFeedbacks = reviewHistory
+      .slice(0, currentHistoryIndex + 1)
+      .map(entry => entry.userFeedback)
+      .filter(Boolean);
+
+    const refinementContext = {
+      previousIntent: currentEntry.data?.inferredIntent || '',
+      previousSuggestions: currentEntry.data?.suggestions || [],
+      feedbackHistory: [...priorFeedbacks, trimmed],
+      latestFeedback: trimmed
+    };
+
+    chrome.runtime.sendMessage({
+      action: 'REFINE_REVIEW',
+      originalText: currentEntry.originalText,
+      refinementContext
+    }, (response) => {
+      if (requestId !== activeRefineRequestId) return;
+      clearSafetyTimeout();
+      isRefining = false;
+      pendingRefineText = '';
+
+      if (chrome.runtime.lastError) {
+        renderError({
+          message: chrome.runtime.lastError.message || '확장 프로그램 백그라운드 연결에 실패했습니다.'
+        });
+        return;
+      }
+
+      if (!response || !response.ok) {
+        renderError(response?.error || '재검토 요청 처리 중 오류가 발생했습니다.');
+        return;
+      }
+
+      reviewHistory.push({
+        data: response.data,
+        originalText: currentEntry.originalText,
+        userFeedback: trimmed
+      });
+      currentHistoryIndex = reviewHistory.length - 1;
+      renderResult('review', response.data, currentEntry.originalText);
+    });
   }
 
   // 에러 분석 함수 (무료 티어 할당량 초과, 키 오류 등 진단)
@@ -515,8 +655,11 @@
   // 3. 에러 화면
   function renderError(errorData) {
     clearSafetyTimeout();
+    isRefining = false;
+    pendingRefineText = '';
     const card = getOrCreateCard();
     const info = analyzeError(errorData);
+    const hasPreviousHistory = reviewHistory.length > 0;
 
     card.innerHTML = `
       <div class="gemini-header error-header">
@@ -548,6 +691,7 @@
         ` : ''}
 
         <div class="error-actions">
+          ${hasPreviousHistory ? '<button class="btn btn-secondary back-to-result-btn">← 이전 답변으로 돌아가기</button>' : ''}
           <button class="btn btn-primary open-options-btn">⚙️ 환경설정 열기</button>
           <button class="btn btn-secondary close-btn-action">닫기</button>
         </div>
@@ -557,7 +701,7 @@
     setupCardEvents(card);
   }
 
-  // 이벤트 바인딩 (닫기, 복사, 드래그, 옵션 열기)
+  // 이벤트 바인딩 (닫기, 복사, 드래그, 옵션 열기, 히스토리 탐색, 재검토 요청)
   function setupCardEvents(card) {
     setupDraggable(card);
 
@@ -565,6 +709,67 @@
     card.querySelectorAll('.close-btn, .close-btn-action').forEach(btn => {
       btn.addEventListener('click', closePopup);
     });
+
+    // 이전 답변으로 돌아가기 버튼 (재검토 중 오류 발생 시)
+    card.querySelectorAll('.back-to-result-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entry = reviewHistory[currentHistoryIndex];
+        if (entry) {
+          renderResult('review', entry.data, entry.originalText);
+        }
+      });
+    });
+
+    // 히스토리 이전/다음 버튼
+    const prevBtn = card.querySelector('.prev-history-btn');
+    if (prevBtn) {
+      prevBtn.addEventListener('click', () => {
+        if (isRefining || currentHistoryIndex <= 0) return;
+        currentHistoryIndex -= 1;
+        const entry = reviewHistory[currentHistoryIndex];
+        if (entry) {
+          renderResult('review', entry.data, entry.originalText);
+        }
+      });
+    }
+
+    const nextBtn = card.querySelector('.next-history-btn');
+    if (nextBtn) {
+      nextBtn.addEventListener('click', () => {
+        if (isRefining || currentHistoryIndex >= reviewHistory.length - 1) return;
+        currentHistoryIndex += 1;
+        const entry = reviewHistory[currentHistoryIndex];
+        if (entry) {
+          renderResult('review', entry.data, entry.originalText);
+        }
+      });
+    }
+
+    // 추가 의도/재검토 입력창 및 버튼
+    const refineInput = card.querySelector('.refine-input');
+    const refineSubmitBtn = card.querySelector('.refine-submit-btn');
+    if (refineInput) {
+      ['keydown', 'keyup', 'keypress'].forEach(evtName => {
+        refineInput.addEventListener(evtName, (e) => {
+          if (e.key === 'Escape') {
+            closePopup();
+            return;
+          }
+          // 호스트 페이지 단축키(유튜브/노션 등) 충돌 방지
+          e.stopPropagation();
+
+          if (evtName === 'keydown' && e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+            e.preventDefault();
+            handleRefineSubmit(refineInput.value);
+          }
+        });
+      });
+    }
+    if (refineSubmitBtn && refineInput) {
+      refineSubmitBtn.addEventListener('click', () => {
+        handleRefineSubmit(refineInput.value);
+      });
+    }
 
     // 환경설정 열기 버튼
     card.querySelectorAll('.open-options-btn').forEach(btn => {
@@ -662,6 +867,52 @@
 
       .title-wrap .icon {
         font-size: 16px;
+      }
+
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .history-nav {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: rgba(255, 255, 255, 0.18);
+        padding: 2px 6px;
+        border-radius: 9999px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .history-btn {
+        background: transparent;
+        border: none;
+        color: #ffffff;
+        cursor: pointer;
+        font-size: 15px;
+        line-height: 1;
+        padding: 2px 5px;
+        border-radius: 4px;
+        transition: background 0.15s;
+      }
+
+      .history-btn:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.25);
+      }
+
+      .history-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      .history-indicator {
+        color: #ffffff;
+        font-size: 11.5px;
+        min-width: 32px;
+        text-align: center;
+        user-select: none;
       }
 
       .close-btn {
@@ -854,6 +1105,103 @@
         font-size: 13px;
         color: #166534;
         font-weight: 500;
+      }
+
+      .applied-feedback-box {
+        margin-top: 8px;
+        padding: 6px 10px;
+        background: #dcfce7;
+        border-radius: 6px;
+        font-size: 12px;
+        color: #14532d;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .applied-feedback-label {
+        font-weight: 700;
+      }
+
+      .applied-feedback-text {
+        word-break: break-word;
+      }
+
+      .intent-refine-box {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed #86efac;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .refine-input-row {
+        display: flex;
+        gap: 6px;
+      }
+
+      .refine-input {
+        flex: 1;
+        min-width: 0;
+        padding: 7px 10px;
+        border: 1px solid #86efac;
+        border-radius: 6px;
+        font-size: 12.5px;
+        background: #ffffff;
+        color: #0f172a;
+        outline: none;
+      }
+
+      .refine-input:focus {
+        border-color: #16a34a;
+        box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+      }
+
+      .refine-input:disabled {
+        background: #f8fafc;
+        color: #64748b;
+      }
+
+      .refine-submit-btn {
+        padding: 7px 12px;
+        background: #16a34a;
+        color: #ffffff;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.15s;
+      }
+
+      .refine-submit-btn:hover:not(:disabled) {
+        background: #15803d;
+      }
+
+      .refine-submit-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .refine-loading-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #15803d;
+        font-weight: 500;
+      }
+
+      .mini-spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid #bbf7d0;
+        border-top-color: #16a34a;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        flex-shrink: 0;
       }
 
       /* 제안 목록 */

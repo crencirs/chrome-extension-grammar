@@ -94,14 +94,60 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-// 확장 프로그램 내부 메시지 핸들러 (환경설정 열기 등)
-chrome.runtime.onMessage.addListener((message) => {
+// 확장 프로그램 내부 메시지 핸들러 (환경설정 열기, 재검토 요청 등)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'OPEN_OPTIONS') {
     if (chrome.runtime.openOptionsPage) {
       chrome.runtime.openOptionsPage();
     } else {
       chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') });
     }
+    return false;
+  }
+
+  if (message.action === 'REFINE_REVIEW') {
+    (async () => {
+      try {
+        const settings = await getSettings();
+        const provider = settings.provider || 'gemini';
+        const apiKey = getActiveApiKey(settings);
+        const model = getActiveModel(settings);
+
+        if (!apiKey || apiKey.trim() === '') {
+          sendResponse({
+            ok: false,
+            error: {
+              message: `${getProviderLabel(provider)} API 키가 설정되지 않았습니다. 확장 프로그램 아이콘을 클릭하여 설정(Options)에서 API 키를 입력해 주세요.`
+            }
+          });
+          return;
+        }
+
+        const result = await reviewText({
+          text: message.originalText || '',
+          provider,
+          apiKey,
+          model,
+          sourceLangs: settings.reviewSourceLangs || ['en', 'ko'],
+          targetLang: settings.reviewTargetLang || 'ko',
+          refinementContext: message.refinementContext || null
+        });
+
+        sendResponse({ ok: true, data: result });
+      } catch (error) {
+        console.error('Refine review execution error:', error);
+        sendResponse({
+          ok: false,
+          error: {
+            message: error.message || '재검토 처리 중 오류가 발생했습니다.',
+            status: error.status || 0,
+            code: error.code || '',
+            details: error.details || error.message || ''
+          }
+        });
+      }
+    })();
+    return true;
   }
 });
 
