@@ -42,12 +42,13 @@ AI API를 활용하여 웹페이지에서 드래그한 문장을 손쉽게 번�
 
 1. 브라우저 우측 상단 퍼즐 아이콘(확장 프로그램)에서 **AI 번역 & 문장 검토기**를 클릭합니다.
 2. **'⚙️ 환경설정'** 버튼을 누르거나, 확장 프로그램 우클릭 후 '옵션'으로 들어갑니다.
-3. **API Key**: [Google AI Studio](https://aistudio.google.com/app/apikey) 등에서 발급받은 API 키를 입력하고 **'API 키 검증'** 버튼을 눌러 확인합니다.
+3. **AI 서비스 제공자 및 API Key**:
+   - **Google Gemini**: [Google AI Studio](https://aistudio.google.com/app/apikey)에서 발급받은 API 키를 입력하고 **'API 키 검증'** 버튼을 눌러 확인합니다.
+   - **OpenRouter**: [OpenRouter](https://openrouter.ai/keys)에서 발급받은 API 키(`sk-or-v1-...`)를 입력하면 다양한 무료(`:free`) 및 유료 모델을 선택해 사용할 수 있습니다.
+   - 각 제공자별 API 키와 모델 설정은 독립적으로 저장되므로 언제든 전환하여 사용할 수 있습니다.
 4. **AI 모델 선택**:
-   - `gemini-3.5-flash-lite` (기본값, 추천)
-   - `gemini-3.1-flash-lite`
-   - `gemma-4-26b-a4b-it`
-   - `gemma-4-31b-it`
+   - **Google Gemini**: `gemini-3.5-flash-lite` (기본값, 추천), `gemini-3.1-flash-lite`, `gemma-4-26b-a4b-it`, `gemma-4-31b-it`
+   - **OpenRouter**: `openrouter/free` (무료 모델 자동 선택), `google/gemma-3-27b-it:free`, `meta-llama/llama-3.3-70b-instruct:free`, `deepseek/deepseek-chat-v3-0324:free`, `qwen/qwen3-32b:free`, `mistralai/mistral-small-3.1-24b-instruct:free`, `openai/gpt-4o-mini`, `anthropic/claude-3.5-haiku`
    - 또는 **직접 입력(Custom)** 지원
 5. **번역 기능 언어 설정**:
    - 출발 언어 A (원문): `언어 자동 감지` 또는 특정 언어 선택

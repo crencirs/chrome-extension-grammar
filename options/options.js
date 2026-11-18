@@ -2,6 +2,7 @@
 import { 
   SUPPORTED_LANGUAGES, 
   TRANSLATE_SOURCE_LANGUAGES, 
+  PROVIDER_MODELS,
   DEFAULT_SETTINGS, 
   getSettings, 
   saveSettings 
@@ -9,6 +10,8 @@ import {
 import { callGemini } from '../utils/gemini.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  const providerSelect = document.getElementById('providerSelect');
+  const providerDescription = document.getElementById('providerDescription');
   const apiKeyInput = document.getElementById('apiKey');
   const toggleApiKeyBtn = document.getElementById('toggleApiKeyBtn');
   const testApiKeyBtn = document.getElementById('testApiKeyBtn');
@@ -33,19 +36,76 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 현재 설정 로드
   const settings = await getSettings();
 
-  // 1. API 키 및 모델 세팅
-  apiKeyInput.value = settings.apiKey || '';
-  
-  const savedModel = settings.model || DEFAULT_SETTINGS.model;
-  const isPresetModel = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
-  if (isPresetModel) {
-    modelSelect.value = savedModel;
-    customModelInput.style.display = 'none';
-  } else {
-    modelSelect.value = 'custom';
-    customModelInput.value = savedModel;
-    customModelInput.style.display = 'block';
+  // 1. 제공자, API 키 및 모델 세팅
+  let currentProvider = settings.provider || DEFAULT_SETTINGS.provider;
+  const providerState = {
+    gemini: {
+      apiKey: settings.geminiApiKey || (currentProvider === 'gemini' ? settings.apiKey : '') || '',
+      model: settings.geminiModel || (currentProvider === 'gemini' ? settings.model : '') || DEFAULT_SETTINGS.geminiModel
+    },
+    openrouter: {
+      apiKey: settings.openrouterApiKey || (currentProvider === 'openrouter' ? settings.apiKey : '') || '',
+      model: settings.openrouterModel || (currentProvider === 'openrouter' ? settings.model : '') || DEFAULT_SETTINGS.openrouterModel
+    }
+  };
+
+  function getSelectedModel() {
+    if (modelSelect.value === 'custom') {
+      const fallback = currentProvider === 'openrouter' ? DEFAULT_SETTINGS.openrouterModel : DEFAULT_SETTINGS.geminiModel;
+      return customModelInput.value.trim() || fallback;
+    }
+    return modelSelect.value;
   }
+
+  function renderProviderUI(provider) {
+    const isOpenRouter = provider === 'openrouter';
+    const state = providerState[provider];
+
+    if (isOpenRouter) {
+      providerDescription.innerHTML = 'OpenRouter에서 발급받은 API 키를 입력해 주세요. 다양한 무료(<code>:free</code>) 및 유료 AI 모델을 하나의 키로 사용할 수 있습니다. <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">OpenRouter API 키 발급받기 &rarr;</a>';
+      apiKeyInput.placeholder = 'sk-or-v1-...';
+      customModelInput.placeholder = '모델명 직접 입력 (예: google/gemini-2.5-flash-preview)';
+    } else {
+      providerDescription.innerHTML = 'AI 서비스(Google AI Studio)에서 발급받은 API 키를 입력해 주세요. <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">API 키 발급받기 &rarr;</a>';
+      apiKeyInput.placeholder = 'AIzaSy...';
+      customModelInput.placeholder = '모델명 직접 입력 (예: gemini-3.5-flash-lite)';
+    }
+
+    apiKeyInput.value = state.apiKey || '';
+    apiKeyStatus.textContent = '';
+    apiKeyStatus.className = 'status-hint';
+
+    const models = PROVIDER_MODELS[provider] || PROVIDER_MODELS.gemini;
+    modelSelect.innerHTML = [
+      ...models.map(m => `<option value="${m.value}">${m.label}</option>`),
+      '<option value="custom">직접 입력 (Custom)...</option>'
+    ].join('');
+
+    const savedModel = state.model || models[0].value;
+    const isPresetModel = models.some(m => m.value === savedModel);
+    if (isPresetModel) {
+      modelSelect.value = savedModel;
+      customModelInput.value = '';
+      customModelInput.style.display = 'none';
+    } else {
+      modelSelect.value = 'custom';
+      customModelInput.value = savedModel;
+      customModelInput.style.display = 'block';
+    }
+  }
+
+  providerSelect.value = currentProvider;
+  renderProviderUI(currentProvider);
+
+  providerSelect.addEventListener('change', () => {
+    // 전환 전 현재 제공자의 입력값을 메모리에 보관
+    providerState[currentProvider] = {
+      apiKey: apiKeyInput.value.trim(),
+      model: getSelectedModel()
+    };
+    currentProvider = providerSelect.value;
+    renderProviderUI(currentProvider);
+  });
 
   modelSelect.addEventListener('change', () => {
     if (modelSelect.value === 'custom') {
@@ -55,13 +115,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       customModelInput.style.display = 'none';
     }
   });
-
-  function getSelectedModel() {
-    if (modelSelect.value === 'custom') {
-      return customModelInput.value.trim() || 'gemini-3.5-flash-lite';
-    }
-    return modelSelect.value;
-  }
 
   // 2. 번역 기능 드롭다운 렌더링
   const currentTranslateSource = settings.translateSourceLang || DEFAULT_SETTINGS.translateSourceLang;
@@ -175,12 +228,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     apiKeyStatus.className = 'status-hint';
 
     try {
-      await callGemini({
+      const res = await callGemini({
+        provider: currentProvider,
         apiKey: key,
         model: getSelectedModel(),
-        contents: [{ parts: [{ text: 'Respond with OK' }] }]
+        contents: [{ parts: [{ text: 'Respond with OK' }] }],
+        returnMeta: true
       });
-      apiKeyStatus.textContent = '✓ 유효한 API 키입니다. 정상 연결되었습니다!';
+      const timeText = typeof res?.elapsedMs === 'number'
+        ? `${(res.elapsedMs / 1000).toFixed(1)}초`
+        : '';
+      const extraParts = [];
+      if (res?.routedModel) extraParts.push(`실제 응답 모델: ${res.routedModel}`);
+      if (timeText) extraParts.push(timeText);
+      apiKeyStatus.textContent = extraParts.length > 0
+        ? `✓ 유효한 API 키입니다. 정상 연결되었습니다! (${extraParts.join(', ')})`
+        : '✓ 유효한 API 키입니다. 정상 연결되었습니다!';
       apiKeyStatus.className = 'status-hint success';
     } catch (err) {
       apiKeyStatus.textContent = `✗ 검증 실패: ${err.message}`;
@@ -198,9 +261,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const newSettings = {
+    providerState[currentProvider] = {
       apiKey: apiKeyInput.value.trim(),
-      model: getSelectedModel(),
+      model: getSelectedModel()
+    };
+
+    const newSettings = {
+      provider: currentProvider,
+      apiKey: providerState[currentProvider].apiKey,
+      model: providerState[currentProvider].model,
+      geminiApiKey: providerState.gemini.apiKey,
+      geminiModel: providerState.gemini.model,
+      openrouterApiKey: providerState.openrouter.apiKey,
+      openrouterModel: providerState.openrouter.model,
       // 번역 설정
       translateSourceLang: translateSourceSelect.value,
       translateTargetLang: translateTargetSelect.value,

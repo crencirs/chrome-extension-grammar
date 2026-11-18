@@ -1,5 +1,12 @@
 // popup/popup.js
-import { SUPPORTED_LANGUAGES, TRANSLATE_SOURCE_LANGUAGES, getSettings } from '../utils/storage.js';
+import { 
+  SUPPORTED_LANGUAGES, 
+  TRANSLATE_SOURCE_LANGUAGES, 
+  getSettings, 
+  getActiveApiKey, 
+  getActiveModel, 
+  getProviderLabel 
+} from '../utils/storage.js';
 
 function getLanguageName(code) {
   if (code === 'auto') return '자동 감지';
@@ -9,6 +16,7 @@ function getLanguageName(code) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   const apiKeyBadge = document.getElementById('apiKeyBadge');
+  const providerBadge = document.getElementById('providerBadge');
   const modelBadge = document.getElementById('modelBadge');
   const translateLangBadge = document.getElementById('translateLangBadge');
   const reviewSourceBadge = document.getElementById('reviewSourceBadge');
@@ -16,9 +24,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const openOptionsBtn = document.getElementById('openOptionsBtn');
 
   const settings = await getSettings();
+  const provider = settings.provider || 'gemini';
+  const activeApiKey = getActiveApiKey(settings);
+  const activeModel = getActiveModel(settings);
 
   // API 키 등록 여부 표시
-  if (settings.apiKey && settings.apiKey.trim() !== '') {
+  if (activeApiKey && activeApiKey.trim() !== '') {
     apiKeyBadge.textContent = '등록 완료';
     apiKeyBadge.className = 'badge success';
   } else {
@@ -26,9 +37,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     apiKeyBadge.className = 'badge warning';
   }
 
+  // 제공자 표시
+  if (providerBadge) {
+    providerBadge.textContent = getProviderLabel(provider);
+  }
+
   // 모델 표시
   if (modelBadge) {
-    modelBadge.textContent = settings.model || 'gemini-3.5-flash-lite';
+    modelBadge.textContent = activeModel;
   }
 
   // 번역 언어 표시 (A → B, 설명: C)

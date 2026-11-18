@@ -265,6 +265,12 @@
     const card = getOrCreateCard();
     const isTranslate = mode === 'translate';
     const modeTitle = isTranslate ? 'AI 번역 결과' : 'AI 문장 검토 & 제안';
+    const modelBadgeHtml = data.usedModel
+      ? `<span class="badge model-badge" title="실제 응답을 생성한 AI 모델">모델: ${escapeHtml(data.usedModel)}</span>`
+      : '';
+    const timeBadgeHtml = typeof data.elapsedMs === 'number' && data.elapsedMs >= 0
+      ? `<span class="badge time-badge" title="요청부터 응답까지 걸린 시간">⏱ ${(data.elapsedMs / 1000).toFixed(1)}초</span>`
+      : '';
 
     let contentHtml = '';
 
@@ -296,6 +302,8 @@
       contentHtml = `
         <div class="meta-row">
           <span class="badge lang-badge">감지된 언어: ${escapeHtml(data.detectedLanguage || '자동')}</span>
+          ${modelBadgeHtml}
+          ${timeBadgeHtml}
         </div>
         <div class="section">
           <div class="section-label">원문</div>
@@ -344,6 +352,8 @@
       contentHtml = `
         <div class="meta-row">
           <span class="badge lang-badge">감지된 언어: ${escapeHtml(data.detectedLanguage || '자동')}</span>
+          ${modelBadgeHtml}
+          ${timeBadgeHtml}
         </div>
         <div class="section">
           <div class="section-label">원문</div>
@@ -443,6 +453,18 @@
       };
     }
 
+    // 2-1. 크레딧 부족 (HTTP 402 / Insufficient credits - OpenRouter 유료 모델 등)
+    if (status === 402 || lower.includes('insufficient credits') || lower.includes('more credits') || lower.includes('payment required')) {
+      return {
+        badge: 'HTTP 402 · 크레딧 부족',
+        badgeClass: 'badge-quota',
+        title: 'API 계정 크레딧이 부족합니다',
+        desc: '선택한 유료 모델을 호출하기 위한 OpenRouter 등의 크레딧 잔액이 부족합니다.',
+        solution: '환경설정에서 무료 모델(:free 또는 openrouter/free)로 변경하거나 크레딧을 충전해 주세요.',
+        details
+      };
+    }
+
     // 3. 모델 미지원 / 찾을 수 없음 (HTTP 404 / model_not_found)
     if (status === 404 || lower.includes('not found') || lower.includes('is not supported') || lower.includes('model_not_found')) {
       return {
@@ -455,14 +477,14 @@
       };
     }
 
-    // 4. AI 서버 일시적 과부하 (HTTP 503, 500 / Overloaded / server_error)
-    if (status === 503 || status === 500 || lower.includes('overloaded') || lower.includes('unavailable') || lower.includes('server_error')) {
+    // 4. AI 서버 일시적 과부하 / 상위 공급자 오류 (HTTP 502, 503, 500 / Overloaded / server_error)
+    if (status === 502 || status === 503 || status === 500 || lower.includes('overloaded') || lower.includes('unavailable') || lower.includes('server_error') || lower.includes('provider returned error')) {
       return {
         badge: 'HTTP ' + (status || 503) + ' · AI 서버 과부하',
         badgeClass: 'badge-warning',
-        title: 'AI 서비스 서버에 일시적인 트래픽이 몰렸습니다',
-        desc: 'AI 제공자 측의 서버가 일시적인 과부하 상태이거나 점검 중입니다.',
-        solution: '잠시 후(약 10~20초 뒤) 다시 시도해 주세요.',
+        title: 'AI 서비스 서버에 일시적인 오류가 발생했습니다',
+        desc: 'AI 제공자 측의 서버가 일시적인 과부하 상태이거나 상위 모델 공급자에서 오류를 반환했습니다.',
+        solution: '잠시 후(약 10~20초 뒤) 다시 시도하시거나 환경설정에서 다른 모델로 변경해 주세요.',
         details
       };
     }
@@ -733,6 +755,7 @@
       /* 메타 뱃지 */
       .meta-row {
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
       }
 
@@ -746,6 +769,18 @@
         background: #eff6ff;
         color: #1d4ed8;
         border: 1px solid #bfdbfe;
+      }
+
+      .model-badge {
+        background: #f1f5f9;
+        color: #475569;
+        border-color: #cbd5e1;
+      }
+
+      .time-badge {
+        background: #f0fdf4;
+        color: #15803d;
+        border-color: #bbf7d0;
       }
 
       /* 섹션 공통 */

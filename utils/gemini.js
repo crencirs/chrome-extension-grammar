@@ -9,18 +9,21 @@ function getLanguageName(code) {
 
 /**
  * 텍스트에서 안전하게 JSON을 추출하여 파싱합니다.
- * 마크다운 코드블록(```json ... ```)이나 불필요한 줄글이 섞여 있어도 파싱을 성공시킵니다.
+ * 추론 모델의 <think>...</think> 블록, 마크다운 코드블록(```json ... ```), 불필요한 줄글이 섞여 있어도 파싱을 성공시킵니다.
  */
 function parseJsonSafely(text) {
   if (!text || typeof text !== 'string') return null;
 
+  // 추론(Thinking) 모델이 출력할 수 있는 <think>...</think> 블록 제거
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
   // 1. 순수 JSON 파싱 시도
   try {
-    return JSON.parse(text);
+    return JSON.parse(cleaned);
   } catch (_) {}
 
   // 2. ```json ... ``` 또는 ``` ... ``` 마크다운 블록 추출
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (codeBlockMatch && codeBlockMatch[1]) {
     try {
       return JSON.parse(codeBlockMatch[1].trim());
@@ -28,11 +31,11 @@ function parseJsonSafely(text) {
   }
 
   // 3. 문자열 내부에서 가장 바깥쪽의 { ... } 블록 추출
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
     try {
-      const jsonCandidate = text.slice(firstBrace, lastBrace + 1);
+      const jsonCandidate = cleaned.slice(firstBrace, lastBrace + 1);
       return JSON.parse(jsonCandidate);
     } catch (_) {}
   }
@@ -40,18 +43,155 @@ function parseJsonSafely(text) {
   return null;
 }
 
+function getRoutedModelIfDifferent(requestedModel, actualModel) {
+  if (!actualModel || typeof actualModel !== 'string') return '';
+  const reqNorm = (requestedModel || '').trim().toLowerCase().replace(/:free$/, '');
+  const actNorm = actualModel.trim().toLowerCase().replace(/:free$/, '');
+  if (!actNorm || reqNorm === actNorm) return '';
+  return actualModel.trim();
+}
+
 /**
- * Gemini / Gemma API를 호출하여 콘텐츠를 생성합니다.
+ * OpenRouter Chat Completions API를 호출하여 콘텐츠를 생성합니다.
+ */
+async function callOpenRouter({ apiKey, model = 'openrouter/free', contents, systemInstruction = '', responseSchema = null }) {
+  const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+  const targetModel = model || 'openrouter/free';
+  const isGemma = targetModel.toLowerCase().includes('gemma');
+
+  const userPrompt = contents?.[0]?.parts?.[0]?.text || '';
+  let promptWithSchema = userPrompt;
+  if (responseSchema) {
+    promptWithSchema += `\n\n[IMPORTANT OUTPUT FORMAT]\nDo NOT wrap with markdown, explanation, or chat text. Output MUST be ONLY a single valid raw JSON object matching this schema:\n${JSON.stringify(responseSchema, null, 2)}`;
+  }
+
+  const messages = [];
+  if (isGemma) {
+    // 일부 OpenRouter 상위 공급자(Google AI Studio 등)는 Gemma에서 system role을 거부하므로 user 메시지로 병합
+    let combinedPrompt = '';
+    if (systemInstruction) {
+      combinedPrompt += `[SYSTEM INSTRUCTION]\n${systemInstruction}\n\n`;
+    }
+    combinedPrompt += `[USER REQUEST]\n${promptWithSchema}`;
+    messages.push({ role: 'user', content: combinedPrompt });
+  } else {
+    if (systemInstruction) {
+      messages.push({ role: 'system', content: systemInstruction });
+    }
+    messages.push({ role: 'user', content: promptWithSchema });
+  }
+
+  const body = {
+    model: targetModel,
+    messages,
+    temperature: 0.3
+  };
+
+  // 45초 타임아웃 제어
+  const controller = new AbortController();
+  const timeoutMs = 45000;
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'HTTP-Referer': 'https://github.com/crencirs/chrome-extension-grammar',
+        'X-Title': 'AI Translation and Grammar Reviewer'
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (fetchErr) {
+    clearTimeout(timeoutId);
+    if (fetchErr.name === 'AbortError') {
+      const timeoutErr = new Error(`AI 서버 응답 시간 초과 (${timeoutMs / 1000}초 Timeout): ${targetModel} 모델의 응답 생성이 지연되었거나 서버가 응답하지 않습니다. 다른 모델로 변경해 보세요.`);
+      timeoutErr.status = 504;
+      timeoutErr.code = 'DEADLINE_EXCEEDED';
+      throw timeoutErr;
+    }
+    throw fetchErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (_) {}
+
+  if (!response.ok || data?.error) {
+    const httpStatus = response.ok ? (data?.error?.code || 502) : response.status;
+    let errorMsg = `OpenRouter API 요청 실패 (HTTP ${httpStatus})`;
+    let errorCode = '';
+    let details = '';
+
+    if (data?.error) {
+      errorCode = String(data.error.code || '');
+      const baseMsg = data.error.message || '';
+      const metaParts = [];
+      if (data.error.metadata?.provider_name) {
+        metaParts.push(`Provider: ${data.error.metadata.provider_name}`);
+      }
+      if (data.error.metadata?.raw) {
+        metaParts.push(
+          typeof data.error.metadata.raw === 'string'
+            ? data.error.metadata.raw
+            : JSON.stringify(data.error.metadata.raw)
+        );
+      }
+      details = [baseMsg, ...metaParts].filter(Boolean).join('\n');
+      errorMsg = baseMsg ? `[${httpStatus}] ${baseMsg}` : errorMsg;
+    }
+
+    const err = new Error(errorMsg);
+    err.status = Number(httpStatus) || response.status || 500;
+    err.code = errorCode;
+    err.details = details || errorMsg;
+    throw err;
+  }
+
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content || typeof content !== 'string' || content.trim() === '') {
+    throw new Error('OpenRouter AI로부터 유효한 응답을 받지 못했습니다.');
+  }
+
+  const routedModel = getRoutedModelIfDifferent(targetModel, data?.model);
+  return { text: content, routedModel };
+}
+
+/**
+ * AI API를 호출하여 콘텐츠를 생성합니다 (Google Gemini / OpenRouter 지원).
  * - Gemma 모델은 systemInstruction과 responseSchema를 지원하지 않으므로 자동으로 프롬프트 결합 방식으로 폴백합니다.
  * - 45초 타임아웃을 적용하여 무한 대기를 방지합니다.
  */
-export async function callGemini({ apiKey, model = 'gemini-3.5-flash-lite', contents, systemInstruction = '', responseSchema = null }) {
+export async function callGemini({ provider = 'gemini', apiKey, model = 'gemini-3.5-flash-lite', contents, systemInstruction = '', responseSchema = null, returnMeta = false }) {
   if (!apiKey || apiKey.trim() === '') {
     throw new Error('API 키가 설정되지 않았습니다. 확장 프로그램 설정(Options)에서 API 키를 입력해 주세요.');
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
-  const isGemma = (model || '').toLowerCase().includes('gemma');
+  const startTime = Date.now();
+
+  if (provider === 'openrouter') {
+    const res = await callOpenRouter({
+      apiKey,
+      model: model || 'openrouter/free',
+      contents,
+      systemInstruction,
+      responseSchema
+    });
+    const elapsedMs = Date.now() - startTime;
+    return returnMeta ? { ...res, elapsedMs } : res.text;
+  }
+
+  const targetModel = model || 'gemini-3.5-flash-lite';
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey.trim()}`;
+  const isGemma = targetModel.toLowerCase().includes('gemma');
 
   let finalContents = contents;
   const body = {
@@ -109,7 +249,7 @@ export async function callGemini({ apiKey, model = 'gemini-3.5-flash-lite', cont
   } catch (fetchErr) {
     clearTimeout(timeoutId);
     if (fetchErr.name === 'AbortError') {
-      const timeoutErr = new Error(`AI 서버 응답 시간 초과 (${timeoutMs / 1000}초 Timeout): ${model} 모델의 크기가 커서 응답 생성이 지연되었거나 서버가 응답하지 않습니다. 다른 경량 모델(예: gemini-3.5-flash-lite)로 변경해 보세요.`);
+      const timeoutErr = new Error(`AI 서버 응답 시간 초과 (${timeoutMs / 1000}초 Timeout): ${targetModel} 모델의 크기가 커서 응답 생성이 지연되었거나 서버가 응답하지 않습니다. 다른 경량 모델(예: gemini-3.5-flash-lite)로 변경해 보세요.`);
       timeoutErr.status = 504;
       timeoutErr.code = 'DEADLINE_EXCEEDED';
       throw timeoutErr;
@@ -146,13 +286,17 @@ export async function callGemini({ apiKey, model = 'gemini-3.5-flash-lite', cont
     throw new Error('AI로부터 유효한 응답을 받지 못했습니다.');
   }
 
-  return candidate.content.parts[0].text;
+  const text = candidate.content.parts[0].text;
+  const elapsedMs = Date.now() - startTime;
+  return returnMeta ? { text, routedModel: '', elapsedMs } : text;
 }
+
+export const callAI = callGemini;
 
 /**
  * 번역 수행 함수
  */
-export async function translateText({ text, apiKey, model, sourceLang = 'auto', targetLang = 'ko', explanationLang = 'ko' }) {
+export async function translateText({ text, provider = 'gemini', apiKey, model, sourceLang = 'auto', targetLang = 'ko', explanationLang = 'ko' }) {
   const targetLangName = getLanguageName(targetLang);
   const explanationLangName = getLanguageName(explanationLang);
   const isAuto = !sourceLang || sourceLang === 'auto';
@@ -211,31 +355,35 @@ ${text}
     required: ["detectedLanguage", "translatedText", "alternatives"]
   };
 
-  const responseText = await callGemini({
+  const { text: responseText, routedModel, elapsedMs } = await callGemini({
+    provider,
     apiKey,
     model,
     systemInstruction,
     contents: [{ parts: [{ text: prompt }] }],
-    responseSchema: schema
+    responseSchema: schema,
+    returnMeta: true
   });
 
   const parsed = parseJsonSafely(responseText);
   if (parsed && parsed.translatedText) {
-    return parsed;
+    return { ...parsed, usedModel: routedModel || '', elapsedMs };
   }
 
   return {
     detectedLanguage: "자동 감지",
     translatedText: responseText,
     alternatives: [],
-    notes: ""
+    notes: "",
+    usedModel: routedModel || '',
+    elapsedMs
   };
 }
 
 /**
  * 문장 검토 및 제안 수행 함수
  */
-export async function reviewText({ text, apiKey, model, sourceLangs, targetLang }) {
+export async function reviewText({ text, provider = 'gemini', apiKey, model, sourceLangs, targetLang }) {
   const sourceLangNames = (sourceLangs || []).map(getLanguageName).join(', ');
   const targetLangName = getLanguageName(targetLang);
 
@@ -299,17 +447,19 @@ ${text}
     required: ["detectedLanguage", "inferredIntent", "suggestions", "grammarIssues"]
   };
 
-  const responseText = await callGemini({
+  const { text: responseText, routedModel, elapsedMs } = await callGemini({
+    provider,
     apiKey,
     model,
     systemInstruction,
     contents: [{ parts: [{ text: prompt }] }],
-    responseSchema: schema
+    responseSchema: schema,
+    returnMeta: true
   });
 
   const parsed = parseJsonSafely(responseText);
   if (parsed && parsed.suggestions) {
-    return parsed;
+    return { ...parsed, usedModel: routedModel || '', elapsedMs };
   }
 
   return {
@@ -317,6 +467,8 @@ ${text}
     inferredIntent: "의도 유추 불가",
     suggestions: [{ text: responseText, label: "기본 결과" }],
     grammarIssues: [],
-    overallFeedback: ""
+    overallFeedback: "",
+    usedModel: routedModel || '',
+    elapsedMs
   };
 }

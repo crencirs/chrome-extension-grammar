@@ -1,5 +1,5 @@
 // background/service-worker.js
-import { getSettings } from '../utils/storage.js';
+import { getSettings, getActiveApiKey, getActiveModel, getProviderLabel } from '../utils/storage.js';
 import { translateText, reviewText } from '../utils/gemini.js';
 
 // 확장 프로그램 설치 또는 업데이트 시 컨텍스트 메뉴 등록
@@ -37,11 +37,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     // 2. 설정 정보 가져오기
     const settings = await getSettings();
+    const provider = settings.provider || 'gemini';
+    const apiKey = getActiveApiKey(settings);
+    const model = getActiveModel(settings);
 
-    if (!settings.apiKey || settings.apiKey.trim() === '') {
+    if (!apiKey || apiKey.trim() === '') {
       await sendMessageToTab(tab.id, {
         action: 'SHOW_ERROR',
-        message: 'API 키가 설정되지 않았습니다. 확장 프로그램 아이콘을 클릭하여 설정(Options)에서 API 키를 입력해 주세요.'
+        message: `${getProviderLabel(provider)} API 키가 설정되지 않았습니다. 확장 프로그램 아이콘을 클릭하여 설정(Options)에서 API 키를 입력해 주세요.`
       });
       return;
     }
@@ -51,8 +54,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (mode === 'translate') {
       result = await translateText({
         text: selectedText,
-        apiKey: settings.apiKey,
-        model: settings.model,
+        provider,
+        apiKey,
+        model,
         sourceLang: settings.translateSourceLang || 'auto',
         targetLang: settings.translateTargetLang || 'ko',
         explanationLang: settings.translateExplanationLang || 'ko'
@@ -60,8 +64,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     } else {
       result = await reviewText({
         text: selectedText,
-        apiKey: settings.apiKey,
-        model: settings.model,
+        provider,
+        apiKey,
+        model,
         sourceLangs: settings.reviewSourceLangs || ['en', 'ko'],
         targetLang: settings.reviewTargetLang || 'ko'
       });
