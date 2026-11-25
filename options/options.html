@@ -122,6 +122,47 @@
         </div>
       </section>
 
+      <!-- 4. 단축키 및 빠른 실행 설정 -->
+      <section class="card">
+        <h2>4. 단축키 및 빠른 실행 설정</h2>
+        <p class="description">우클릭 메뉴 대신 Chrome 공식 단축키로 즉시 번역 또는 문장 검토를 실행할 수 있습니다. 다른 확장 프로그램과의 충돌 없이 Chrome 단축키 관리 페이지에서 안전하게 변경 가능합니다.</p>
+
+        <div class="shortcut-box">
+          <div class="shortcut-box-header">
+            <span class="group-title">
+              Chrome 공식 단축키
+              <span class="help-badge">브라우저 전역 동작</span>
+            </span>
+            <div class="shortcut-box-actions">
+              <button type="button" id="refreshShortcutsBtn" class="btn btn-outline btn-sm" title="단축키 상태 새로고침">🔄 새로고침</button>
+              <button type="button" id="openChromeShortcutsBtn" class="btn btn-secondary btn-sm">Chrome 단축키 설정 열기 &rarr;</button>
+            </div>
+          </div>
+          <div class="shortcut-summary-list">
+            <div class="shortcut-summary-item">
+              <span>선택한 문장 번역하기</span>
+              <kbd id="chromeTranslateShortcut" class="shortcut-kbd">확인 중...</kbd>
+            </div>
+            <div class="shortcut-summary-item">
+              <span>선택한 문장 검토하기</span>
+              <kbd id="chromeReviewShortcut" class="shortcut-kbd">확인 중...</kbd>
+            </div>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="form-group">
+          <label class="checkbox-label single-toggle-label" for="autoSelectFocusedCheckbox">
+            <input type="checkbox" id="autoSelectFocusedCheckbox">
+            <span>선택 영역 없을 때 커서 위치 전체 자동 선택</span>
+          </label>
+          <p class="description" style="margin-top: 4px; margin-bottom: 0;">
+            켜두면 드래그한 텍스트가 없는 상태에서 단축키를 눌렀을 때, 현재 커서가 위치한 입력창(input, textarea, 에디터 등)의 모든 텍스트를 자동으로 선택 상태로 만든 뒤 번역/검토합니다. 이미 선택한 텍스트가 있을 때는 선택한 부분만 처리합니다.
+          </p>
+        </div>
+      </section>
+
       <!-- 저장 버튼 & 알림 -->
       <div class="action-footer">
         <button id="saveBtn" class="btn btn-primary">설정 저장</button>

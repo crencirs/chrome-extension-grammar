@@ -36,6 +36,22 @@
     "page": "options/options.html",
     "open_in_tab": true
   },
+  "commands": {
+    "translate_selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+T",
+        "mac": "Alt+Shift+T"
+      },
+      "description": "선택한 문장을 번역하기"
+    },
+    "review_selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+R",
+        "mac": "Alt+Shift+R"
+      },
+      "description": "선택한 문장을 검토하기"
+    }
+  },
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

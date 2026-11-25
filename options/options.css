@@ -273,3 +273,61 @@ select:focus {
   opacity: 1;
 }
 
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+.shortcut-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.shortcut-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.shortcut-box-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcut-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13.5px;
+  color: #334155;
+}
+
+.shortcut-kbd {
+  display: inline-block;
+  padding: 3px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 1px 0 #cbd5e1;
+}
+
+.single-toggle-label {
+  width: fit-content;
+}
+

@@ -221,9 +221,104 @@
     });
   }
 
+  function isSelectableTextInput(el) {
+    if (!el || el === hostElement) return false;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName === 'INPUT') {
+      const blockedTypes = ['password', 'hidden', 'checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'image', 'range', 'color'];
+      return !blockedTypes.includes((el.type || 'text').toLowerCase());
+    }
+    return false;
+  }
+
+  function findContentEditableRoot(el) {
+    let curr = el;
+    let root = null;
+    while (curr && curr !== document.body && curr !== document.documentElement) {
+      if (curr.isContentEditable) {
+        root = curr;
+      } else if (root) {
+        break;
+      }
+      curr = curr.parentElement;
+    }
+    return root || (el && el.isContentEditable ? el : null);
+  }
+
+  // 단축키 호출 시 선택 영역 추출 (옵션 활성화 & 미선택 시 커서 위치 전체 자동 선택)
+  function extractSelectionForShortcut(autoSelectFocused) {
+    const activeEl = document.activeElement;
+
+    // 1. 먼저 사용자가 이미 선택한 텍스트가 있는지 확인 (옵션 여부와 무관하게 우선 처리)
+    if (isSelectableTextInput(activeEl) && typeof activeEl.selectionStart === 'number' && activeEl.selectionStart !== activeEl.selectionEnd) {
+      const start = Math.min(activeEl.selectionStart, activeEl.selectionEnd);
+      const end = Math.max(activeEl.selectionStart, activeEl.selectionEnd);
+      const inputSelected = (activeEl.value || '').slice(start, end).trim();
+      if (inputSelected) {
+        const rect = activeEl.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          lastSelectionRect = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+        }
+        return { text: inputSelected, autoSelected: false };
+      }
+    }
+
+    const selection = window.getSelection();
+    const selectedText = selection ? selection.toString().trim() : '';
+    if (selectedText) {
+      captureSelectionRect();
+      return { text: selectedText, autoSelected: false };
+    }
+
+    // 2. 선택된 텍스트가 없을 때: 옵션이 꺼져 있으면 안내 메시지 사유 반환
+    if (!autoSelectFocused) {
+      return { text: '', reason: 'no_selection_option_off' };
+    }
+
+    // 3. 옵션이 켜져 있으면 커서가 위치한 입력 요소의 전체 텍스트를 자동 선택
+    if (isSelectableTextInput(activeEl)) {
+      const fullText = (activeEl.value || '').trim();
+      if (fullText) {
+        activeEl.focus();
+        activeEl.select();
+        const rect = activeEl.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          lastSelectionRect = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+        }
+        return { text: fullText, autoSelected: true };
+      }
+    }
+
+    if (activeEl && activeEl !== hostElement && activeEl.isContentEditable) {
+      const editableRoot = findContentEditableRoot(activeEl);
+      const fullText = (editableRoot?.innerText || '').trim();
+      if (editableRoot && fullText) {
+        const range = document.createRange();
+        range.selectNodeContents(editableRoot);
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        const rect = editableRoot.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          lastSelectionRect = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+        }
+        return { text: fullText, autoSelected: true };
+      }
+    }
+
+    return { text: '', reason: 'no_focused_text' };
+  }
+
   // 메시지 수신 핸들러
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.action === 'SHOW_LOADING') {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'GET_SELECTION_FOR_SHORTCUT') {
+      sendResponse(extractSelectionForShortcut(Boolean(message.autoSelectFocused)));
+      return false;
+    } else if (message.action === 'SHOW_NOTICE') {
+      renderNotice(message.noticeType, message.mode);
+    } else if (message.action === 'SHOW_LOADING') {
       activeRefineRequestId += 1;
       reviewHistory = [];
       currentHistoryIndex = 0;
@@ -701,6 +796,61 @@
     setupCardEvents(card);
   }
 
+  // 4. 안내 화면 (단축키 실행 시 선택된 텍스트 없음 등)
+  function renderNotice(noticeType, mode) {
+    clearSafetyTimeout();
+    isRefining = false;
+    pendingRefineText = '';
+    reviewHistory = [];
+    currentHistoryIndex = 0;
+
+    const card = getOrCreateCard();
+    const actionLabel = mode === 'translate' ? '번역' : '검토';
+
+    let badge = '안내';
+    let title = '선택된 텍스트가 없습니다';
+    let desc = `먼저 ${actionLabel}할 문장을 마우스로 드래그해 주세요.`;
+    let tip = '💡 선택한 텍스트가 없어도 커서가 위치한 입력창의 전체 문장을 바로 처리하고 싶다면, 환경설정에서 [선택 영역 없을 때 커서 위치 전체 자동 선택] 옵션을 켜보세요.';
+    let showOptionsBtn = true;
+
+    if (noticeType === 'no_focused_text') {
+      badge = '입력창 텍스트 없음';
+      title = '선택된 텍스트나 입력된 문장이 없습니다';
+      desc = `드래그한 문장이 없고, 현재 커서가 위치한 입력창에서도 ${actionLabel}할 텍스트를 찾지 못했습니다.`;
+      tip = '웹페이지 문장을 마우스로 드래그하거나, 텍스트가 입력된 입력창 안을 클릭한 상태에서 단축키를 다시 눌러 주세요.';
+      showOptionsBtn = false;
+    }
+
+    card.innerHTML = `
+      <div class="gemini-header notice-header">
+        <div class="title-wrap">
+          <span class="icon">ℹ️</span>
+          <span class="title">선택 내역 안내</span>
+        </div>
+        <button class="close-btn" title="닫기 (Esc)">&times;</button>
+      </div>
+      <div class="gemini-body error-view">
+        <div class="error-meta-row">
+          <span class="error-badge badge-notice">${escapeHtml(badge)}</span>
+        </div>
+        <div class="error-main-box">
+          <h4 class="error-title">${escapeHtml(title)}</h4>
+          <p class="error-desc">${escapeHtml(desc)}</p>
+        </div>
+        <div class="error-solution-box">
+          <span class="solution-label">📌 사용 팁:</span>
+          <p class="solution-text">${escapeHtml(tip)}</p>
+        </div>
+        <div class="error-actions">
+          ${showOptionsBtn ? '<button class="btn btn-primary open-options-btn">⚙️ 환경설정에서 옵션 켜기</button>' : ''}
+          <button class="btn btn-secondary close-btn-action">닫기</button>
+        </div>
+      </div>
+    `;
+
+    setupCardEvents(card);
+  }
+
   // 이벤트 바인딩 (닫기, 복사, 드래그, 옵션 열기, 히스토리 탐색, 재검토 요청)
   function setupCardEvents(card) {
     setupDraggable(card);
@@ -855,6 +1005,10 @@
 
       .gemini-header.error-header {
         background: linear-gradient(135deg, #dc2626, #b91c1c);
+      }
+
+      .gemini-header.notice-header {
+        background: linear-gradient(135deg, #0284c7, #0369a1);
       }
 
       .title-wrap {
@@ -1333,6 +1487,12 @@
         background: #fefce8;
         color: #a16207;
         border: 1px solid #fef08a;
+      }
+
+      .error-badge.badge-notice {
+        background: #e0f2fe;
+        color: #0369a1;
+        border: 1px solid #bae6fd;
       }
 
       .error-main-box {

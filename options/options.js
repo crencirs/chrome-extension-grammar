@@ -29,6 +29,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const reviewSourceLangWarning = document.getElementById('reviewSourceLangWarning');
   const reviewTargetSelect = document.getElementById('reviewTargetSelect');
 
+  // 단축키 설정 요소
+  const refreshShortcutsBtn = document.getElementById('refreshShortcutsBtn');
+  const openChromeShortcutsBtn = document.getElementById('openChromeShortcutsBtn');
+  const chromeTranslateShortcut = document.getElementById('chromeTranslateShortcut');
+  const chromeReviewShortcut = document.getElementById('chromeReviewShortcut');
+  const autoSelectFocusedCheckbox = document.getElementById('autoSelectFocusedCheckbox');
+
   // 저장 요소
   const saveBtn = document.getElementById('saveBtn');
   const saveStatus = document.getElementById('saveStatus');
@@ -202,6 +209,44 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 초기 상태 렌더링
   updateCheckboxUI();
 
+  // 5. 단축키 및 빠른 실행 설정 세팅
+  function loadChromeShortcuts() {
+    if (!chrome.commands || !chrome.commands.getAll) {
+      chromeTranslateShortcut.textContent = 'Alt+Shift+T';
+      chromeReviewShortcut.textContent = 'Alt+Shift+R';
+      return;
+    }
+    chrome.commands.getAll((commands) => {
+      const translateCmd = (commands || []).find(c => c.name === 'translate_selection');
+      const reviewCmd = (commands || []).find(c => c.name === 'review_selection');
+      chromeTranslateShortcut.textContent = translateCmd?.shortcut || '미지정';
+      chromeReviewShortcut.textContent = reviewCmd?.shortcut || '미지정';
+    });
+  }
+
+  loadChromeShortcuts();
+
+  // 단축키 설정 탭에서 돌아왔을 때 자동 갱신 + 수동 새로고침 버튼 지원
+  window.addEventListener('focus', loadChromeShortcuts);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadChromeShortcuts();
+  });
+  refreshShortcutsBtn.addEventListener('click', loadChromeShortcuts);
+
+  openChromeShortcutsBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
+
+  autoSelectFocusedCheckbox.checked = Boolean(settings.autoSelectFocusedOnShortcut);
+
+  const autoSelectLabel = autoSelectFocusedCheckbox.closest('.checkbox-label');
+  if (autoSelectLabel) {
+    autoSelectLabel.classList.toggle('checked', autoSelectFocusedCheckbox.checked);
+    autoSelectFocusedCheckbox.addEventListener('change', () => {
+      autoSelectLabel.classList.toggle('checked', autoSelectFocusedCheckbox.checked);
+    });
+  }
+
   // API 키 표시/숨김 토글
   toggleApiKeyBtn.addEventListener('click', () => {
     if (apiKeyInput.type === 'password') {
@@ -280,7 +325,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       translateExplanationLang: translateExplanationSelect.value,
       // 검토 설정
       reviewSourceLangs: [...currentReviewSourceLangs],
-      reviewTargetLang: reviewTargetSelect.value
+      reviewTargetLang: reviewTargetSelect.value,
+      // 단축키 및 빠른 실행 설정
+      autoSelectFocusedOnShortcut: Boolean(autoSelectFocusedCheckbox.checked)
     };
 
     try {

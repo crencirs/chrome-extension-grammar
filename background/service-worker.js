@@ -19,20 +19,19 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-// 컨텍스트 메뉴 클릭 이벤트 처리
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (!tab || !tab.id) return;
-  const selectedText = (info.selectionText || '').trim();
-  if (!selectedText) return;
-
-  const mode = info.menuItemId === 'translate_selection' ? 'translate' : 'review';
+/**
+ * 번역 또는 문장 검토를 실행하고 활성 탭에 로딩/결과/에러를 전송하는 공통 함수
+ */
+async function executeAiAction(tabId, mode, selectedText) {
+  const trimmedText = (selectedText || '').trim();
+  if (!tabId || !trimmedText) return;
 
   try {
     // 1. 활성 탭에 로딩 UI 띄우기 요청
-    await sendMessageToTab(tab.id, {
+    await sendMessageToTab(tabId, {
       action: 'SHOW_LOADING',
       mode,
-      selectedText
+      selectedText: trimmedText
     });
 
     // 2. 설정 정보 가져오기
@@ -42,7 +41,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const model = getActiveModel(settings);
 
     if (!apiKey || apiKey.trim() === '') {
-      await sendMessageToTab(tab.id, {
+      await sendMessageToTab(tabId, {
         action: 'SHOW_ERROR',
         message: `${getProviderLabel(provider)} API 키가 설정되지 않았습니다. 확장 프로그램 아이콘을 클릭하여 설정(Options)에서 API 키를 입력해 주세요.`
       });
@@ -53,7 +52,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     let result;
     if (mode === 'translate') {
       result = await translateText({
-        text: selectedText,
+        text: trimmedText,
         provider,
         apiKey,
         model,
@@ -63,7 +62,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       });
     } else {
       result = await reviewText({
-        text: selectedText,
+        text: trimmedText,
         provider,
         apiKey,
         model,
@@ -73,16 +72,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
 
     // 4. 활성 탭에 결과 렌더링 요청
-    await sendMessageToTab(tab.id, {
+    await sendMessageToTab(tabId, {
       action: 'SHOW_RESULT',
       mode,
       data: result,
-      originalText: selectedText
+      originalText: trimmedText
     });
-
   } catch (error) {
     console.error('Service worker execution error:', error);
-    await sendMessageToTab(tab.id, {
+    await sendMessageToTab(tabId, {
       action: 'SHOW_ERROR',
       error: {
         message: error.message || '처리 중 오류가 발생했습니다.',
@@ -92,9 +90,62 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       }
     });
   }
+}
+
+/**
+ * Chrome 공식 단축키 호출 시 선택 텍스트 추출 및 실행
+ */
+async function triggerShortcutAction(tabId, mode) {
+  if (!tabId) return;
+
+  const settings = await getSettings();
+  const autoSelectFocused = Boolean(settings.autoSelectFocusedOnShortcut);
+
+  const selectionRes = await sendMessageToTab(tabId, {
+    action: 'GET_SELECTION_FOR_SHORTCUT',
+    autoSelectFocused
+  });
+
+  // 보호된 페이지(chrome:// 등) 등으로 응답이 없으면 중단
+  if (!selectionRes) return;
+
+  if (selectionRes.text && selectionRes.text.trim() !== '') {
+    await executeAiAction(tabId, mode, selectionRes.text);
+  } else {
+    await sendMessageToTab(tabId, {
+      action: 'SHOW_NOTICE',
+      noticeType: selectionRes.reason || 'no_selection_option_off',
+      mode
+    });
+  }
+}
+
+// 컨텍스트 메뉴 클릭 이벤트 처리
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab || !tab.id) return;
+  const selectedText = (info.selectionText || '').trim();
+  if (!selectedText) return;
+
+  const mode = info.menuItemId === 'translate_selection' ? 'translate' : 'review';
+  await executeAiAction(tab.id, mode, selectedText);
 });
 
-// 확장 프로그램 내부 메시지 핸들러 (환경설정 열기, 재검토 요청 등)
+// Chrome 공식 단축키(commands) 이벤트 처리
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'translate_selection' && command !== 'review_selection') return;
+  const mode = command === 'translate_selection' ? 'translate' : 'review';
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab && activeTab.id) {
+      await triggerShortcutAction(activeTab.id, mode);
+    }
+  } catch (err) {
+    console.error('Command execution error:', err);
+  }
+});
+
+// 확장 프로그램 내부 메시지 핸들러 (환경설정 열기, 단축키 설정 열기, 재검토 요청)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'OPEN_OPTIONS') {
     if (chrome.runtime.openOptionsPage) {
@@ -102,6 +153,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else {
       chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') });
     }
+    return false;
+  }
+
+  if (message.action === 'OPEN_SHORTCUTS') {
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
     return false;
   }
 
@@ -157,7 +213,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  */
 async function sendMessageToTab(tabId, message) {
   try {
-    await chrome.tabs.sendMessage(tabId, message);
+    return await chrome.tabs.sendMessage(tabId, message);
   } catch (err) {
     try {
       // Content script가 아직 실행되지 않은 탭일 경우 동적 주입 시도
@@ -167,9 +223,10 @@ async function sendMessageToTab(tabId, message) {
       });
       // 주입 완료 후 약간의 틱 뒤에 메시지 재전송
       await new Promise(resolve => setTimeout(resolve, 60));
-      await chrome.tabs.sendMessage(tabId, message);
+      return await chrome.tabs.sendMessage(tabId, message);
     } catch (injectErr) {
       console.warn('탭으로 메시지 전송 및 스크립트 주입 실패 (보호된 chrome:// URL 등):', injectErr);
+      return null;
     }
   }
 }

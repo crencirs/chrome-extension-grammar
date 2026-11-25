@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const translateLangBadge = document.getElementById('translateLangBadge');
   const reviewSourceBadge = document.getElementById('reviewSourceBadge');
   const reviewTargetBadge = document.getElementById('reviewTargetBadge');
+  const shortcutBadge = document.getElementById('shortcutBadge');
   const openOptionsBtn = document.getElementById('openOptionsBtn');
 
   const settings = await getSettings();
@@ -64,6 +65,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 검토 설명 언어 표시
   if (reviewTargetBadge) {
     reviewTargetBadge.textContent = getLanguageName(settings.reviewTargetLang || 'ko');
+  }
+
+  // 단축키 표시 (Chrome 공식 단축키)
+  if (shortcutBadge) {
+    const updateShortcutText = (chromeTranslate, chromeReview) => {
+      const t = chromeTranslate || '미지정';
+      const r = chromeReview || '미지정';
+      shortcutBadge.textContent = `${t} / ${r}`;
+    };
+
+    if (chrome.commands && chrome.commands.getAll) {
+      chrome.commands.getAll((commands) => {
+        const tCmd = (commands || []).find(c => c.name === 'translate_selection');
+        const rCmd = (commands || []).find(c => c.name === 'review_selection');
+        updateShortcutText(tCmd?.shortcut, rCmd?.shortcut);
+      });
+    } else {
+      updateShortcutText('Alt+Shift+T', 'Alt+Shift+R');
+    }
   }
 
   // 환경설정 페이지 열기

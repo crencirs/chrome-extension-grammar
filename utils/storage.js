@@ -59,7 +59,9 @@ export const DEFAULT_SETTINGS = {
   translateExplanationLang: 'ko',     // 번역 참고 노트 및 설명 언어
   // 검토 기능 설정
   reviewSourceLangs: ['en', 'ko'],    // 검토 대상 후보 언어 (최대 2개)
-  reviewTargetLang: 'ko'              // 피드백/설명 출력 언어
+  reviewTargetLang: 'ko',             // 피드백/설명 출력 언어
+  // 단축키 및 빠른 실행 설정
+  autoSelectFocusedOnShortcut: false  // 선택 영역 없을 때 커서 위치 전체 자동 선택
 };
 
 export function getProviderLabel(provider) {
@@ -117,6 +119,9 @@ function normalizeSettings(items) {
   // 활성 제공자 기준으로 apiKey / model 동기화
   merged.apiKey = getActiveApiKey(merged);
   merged.model = getActiveModel(merged);
+
+  // 단축키 관련 설정 정규화
+  merged.autoSelectFocusedOnShortcut = Boolean(merged.autoSelectFocusedOnShortcut);
 
   // 구 버전 설정 마이그레이션 fallback
   if (!items.translateTargetLang && items.targetLang) {
